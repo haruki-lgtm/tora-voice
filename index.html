@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="トラに話す">
+<meta name="theme-color" content="#e8732a">
+<meta name="robots" content="noindex, nofollow">
+<title>トラに話す</title>
+<script>
+  // 何かが起きたら画面に出す（スマホではコンソールが見られないため）。本体のスクリプトより前に登録する
+  window.addEventListener('error', function (ev) {
+    try {
+      var box = document.getElementById('fatal');
+      if (!box) { box = document.createElement('pre'); box.id = 'fatal'; box.style.cssText = 'white-space:pre-wrap;color:#b00020;background:#fff3f3;padding:12px;margin:12px;border-radius:12px;font-size:12px;'; (document.body || document.documentElement).appendChild(box); }
+      box.textContent += 'エラー: ' + (ev.message || ev) + (ev.lineno ? ' (行 ' + ev.lineno + ')' : '') + '\n';
+    } catch (e) {}
+  });
+  window.addEventListener('DOMContentLoaded', function () {
+    // 本体が何らかの理由で画面を出せなかったときの保険：1 秒後にどの画面も出ていなければ設定画面を出す
+    setTimeout(function () {
+      var ids = ['secSettings', 'secRecord', 'secReview', 'secAudio', 'secDone'], shown = false;
+      ids.forEach(function (id) { var el = document.getElementById(id); if (el && !el.classList.contains('hidden')) shown = true; });
+      if (!shown) {
+        var st = document.getElementById('secSettings'); if (st) st.classList.remove('hidden');
+        var box = document.getElementById('fatal');
+        if (!box) { box = document.createElement('pre'); box.id = 'fatal'; box.style.cssText = 'white-space:pre-wrap;color:#b00020;background:#fff3f3;padding:12px;margin:12px;border-radius:12px;font-size:12px;'; document.body.appendChild(box); }
+        box.textContent += '画面が出なかったので設定画面を出しました（本体のスクリプトが途中で止まっています）\n';
+      }
+    }, 1000);
+  });
+</script>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" sizes="32x32" href="icon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
+<style>
+  :root { --bg:#f4f5f7; --ink:#1b1f24; --sub:#6b7280; --line:#e5e7eb; --accent:#e8732a; --rec:#d93025; --ok:#1a7f37; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Noto Sans JP",sans-serif; font-size:16px; -webkit-text-size-adjust:100%; }
+  .wrap { display:flex; flex-direction:column; min-height:100%; max-width:560px; margin:0 auto; padding:env(safe-area-inset-top) 0 calc(16px + env(safe-area-inset-bottom)); }
+  header { padding:14px 16px 10px; background:#fff; border-bottom:1px solid var(--line); display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  header h1 { margin:0; font-size:16px; font-weight:600; }
+  header p { margin:4px 0 0; font-size:12px; color:var(--sub); }
+  header button { border:0; background:transparent; color:var(--sub); font-size:12px; padding:6px; cursor:pointer; }
+  main { flex:1; display:flex; flex-direction:column; padding:16px; gap:14px; }
+  .status { text-align:center; font-size:14px; color:var(--sub); min-height:20px; }
+  .status.rec { color:var(--rec); font-weight:600; }
+  .mic { display:flex; justify-content:center; padding:8px 0; }
+  #btnMic { width:150px; height:150px; border-radius:50%; border:0; background:var(--accent); color:#fff; font-size:17px; font-weight:600; box-shadow:0 6px 20px rgba(232,115,42,.35); cursor:pointer; -webkit-tap-highlight-color:transparent; user-select:none; }
+  #btnMic:active { transform:scale(.97); }
+  #btnMic.rec { background:var(--rec); box-shadow:0 0 0 10px rgba(217,48,37,.15), 0 6px 20px rgba(217,48,37,.35); animation:pulse 1.4s infinite; }
+  #btnMic[disabled] { opacity:.5; }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(217,48,37,.35)} 70%{box-shadow:0 0 0 18px rgba(217,48,37,0)} 100%{box-shadow:0 0 0 0 rgba(217,48,37,0)} }
+  .live { min-height:72px; padding:12px; background:#fff; border:1px solid var(--line); border-radius:12px; line-height:1.6; white-space:pre-wrap; word-break:break-word; font-size:15px; }
+  .live .interim { color:var(--sub); }
+  .live:empty::before { content:"ここに話した内容が出ます"; color:#9ca3af; }
+  textarea, input[type=text] { width:100%; padding:12px; border:1px solid var(--line); border-radius:12px; font-size:16px; line-height:1.6; font-family:inherit; background:#fff; }
+  textarea { min-height:150px; resize:vertical; }
+  .hint { font-size:12px; color:var(--sub); margin:0; line-height:1.6; }
+  .btn { display:block; width:100%; border:0; border-radius:12px; padding:14px 16px; font-size:16px; font-weight:600; cursor:pointer; }
+  .btn.primary { background:var(--accent); color:#fff; }
+  .btn.ghost { background:transparent; color:var(--sub); font-weight:500; }
+  .btn[disabled] { opacity:.5; }
+  .card { padding:16px; background:#fff; border:1px solid var(--line); border-radius:12px; line-height:1.7; }
+  .card.ok { border-color:var(--ok); }
+  .card.ok b { color:var(--ok); }
+  .err { color:var(--rec); font-size:14px; line-height:1.6; }
+  .hidden { display:none !important; }
+  label { font-size:13px; color:var(--sub); display:block; margin:0 0 4px; }
+  .field { display:flex; flex-direction:column; gap:2px; }
+  .timer { font-variant-numeric:tabular-nums; }
+  /* v1：トラの返事（吹き出し） */
+  .bubbles { display:flex; flex-direction:column; gap:10px; }
+  .bubble { position:relative; padding:12px 14px; background:#fff4ec; border:1px solid #f3c9ad; border-radius:14px 14px 14px 4px; line-height:1.7; font-size:15px; word-break:break-word; }
+  .bubble .who { font-size:12px; color:var(--accent); font-weight:600; margin:0 0 4px; }
+  .bubble .when { font-size:11px; color:var(--sub); margin:0 0 4px 6px; font-weight:400; }
+  .bubble .txt { white-space:pre-wrap; }
+  .bubble .row { display:flex; gap:8px; margin-top:8px; align-items:center; }
+  .bubble .play { border:1px solid var(--accent); background:#fff; color:var(--accent); border-radius:999px; padding:6px 14px; font-size:14px; font-weight:600; cursor:pointer; }
+  .bubble .play[disabled] { opacity:.5; }
+  .bubble .note { font-size:12px; color:var(--sub); }
+  .bubble.wait { background:#fff; border-style:dashed; color:var(--sub); }
+  .sect-title { font-size:13px; color:var(--sub); margin:4px 0 0; display:flex; justify-content:space-between; align-items:center; }
+  .sect-title button { border:0; background:transparent; color:var(--sub); font-size:12px; cursor:pointer; padding:4px; }
+  .toggle { display:flex; align-items:center; gap:10px; font-size:15px; color:var(--ink); padding:10px 0; }
+  .toggle input { width:22px; height:22px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>トラに話す</h1>
+      <p>話して、確認して、送る。数分以内にトラが動きます。</p>
+    </div>
+    <button id="btnSettings" type="button" title="設定">設定</button>
+  </header>
+  <main>
+    <!-- 0. 設定（送信先 URL と鍵。1 回入れれば localStorage に残る） -->
+    <section id="secSettings" class="hidden">
+      <div class="status">送信先を 1 回だけ設定します</div>
+      <div class="field">
+        <label for="inGas">GAS のウェブアプリ URL（…/exec）</label>
+        <input id="inGas" type="text" inputmode="url" autocomplete="off" placeholder="https://script.google.com/macros/s/…/exec">
+      </div>
+      <div class="field">
+        <label for="inKey">鍵（VOICE_KEY）</label>
+        <input id="inKey" type="text" autocomplete="off" placeholder="24 文字の英数字">
+      </div>
+      <p class="hint">GAS 側の「トラに話す」画面の上にある「マイク対応の画面へ」から開くと、この 2 つは自動で入ります。</p>
+      <label class="toggle"><input type="checkbox" id="inAutoplay" checked> 返事の声を自動再生する</label>
+      <p class="hint">トラの即答と本返事を、届いたら自動で読み上げます。スマホが自動再生を止めたときは「聞く」ボタンで。</p>
+      <button class="btn primary" id="btnSaveSettings" type="button">保存して始める</button>
+      <p class="err hidden" id="errSettings"></p>
+    </section>
+
+    <!-- 1. 録音 -->
+    <section id="secRecord" class="hidden">
+      <div class="status" id="status">ボタンを押して話す（もう一度押すと止まる）</div>
+      <div class="mic"><button id="btnMic" type="button">話す</button></div>
+      <div class="live" id="live"></div>
+      <p class="hint" id="hintNoSpeech"></p>
+      <button class="btn ghost" id="btnToEdit" type="button">文字で打つ</button>
+    </section>
+
+    <!-- 2. 確認・編集 → 送信 -->
+    <section id="secReview" class="hidden">
+      <div class="status">内容を確認して送る（直してもいい）</div>
+      <textarea id="text" placeholder="例：カラコンの什器デザイン、増田くんに今週中の確認をお願いしたい。あと来週の火曜は夕方まで予定を入れないで"></textarea>
+      <p class="hint">送信・支払い・削除など、春木さんの判断が要るものはトラが止めて「判断待ち」にします。</p>
+      <button class="btn primary" id="btnSend" type="button">トラに送る</button>
+      <button class="btn ghost" id="btnMore" type="button">続きを話す</button>
+      <button class="btn ghost" id="btnClear" type="button">消す</button>
+      <p class="err hidden" id="err"></p>
+    </section>
+
+    <!-- 2b. 録音（音声認識が使えない端末）→ 音声ファイルのまま送る -->
+    <section id="secAudio" class="hidden">
+      <div class="status">録音できました（<span class="timer" id="audioLen">0</span> 秒）。このまま送ると GEEKOM で文字にします</div>
+      <audio id="audioPreview" controls style="width:100%"></audio>
+      <p class="hint">文字になるのは次の定時処理（12:30／22:00）です。急ぎなら「やり直す」→「文字で打つ」で。</p>
+      <button class="btn primary" id="btnSendAudio" type="button">音声のまま送る</button>
+      <button class="btn ghost" id="btnResetAudio" type="button">やり直す</button>
+      <p class="err hidden" id="errAudio"></p>
+    </section>
+
+    <!-- 3. 送信済み（v1：下にトラの即答の吹き出し） -->
+    <section id="secDone" class="hidden">
+      <div class="card ok"><b>届けました。</b>30 分以内にトラが動きます。<br><span class="hint" id="doneInfo"></span></div>
+      <div class="bubbles" id="instantBox"></div>
+      <button class="btn primary" id="btnAgain" type="button">もう一度話す</button>
+    </section>
+
+    <!-- 4. トラからの本返事（v1）。どの画面でも下に出る。開いている間 30 秒おきに GAS の replies を見る -->
+    <section id="secReplies" class="hidden">
+      <p class="sect-title"><span>トラからの返事</span><button type="button" id="btnClearReplies" title="表示を消す（既読のまま）">消す</button></p>
+      <div class="bubbles" id="replyList"></div>
+      <p class="hint" id="replyStatus"></p>
+    </section>
+  </main>
+</div>
+
+<script>
+  // ===== 設定（送信先と鍵）=====
+  // 優先順位：URL の ?gas=…&k=… → localStorage。URL は消さない（ホーム画面に追加したアイコンに設定が含まれるように。
+  // ホーム画面から開く Chrome は保存領域が別のことがあるので、URL に残すのがいちばん確実）
+  // URL で来た値が不正（…/dev など）でも捨てずに設定画面の欄に出す（2026-10-22 14:38：欄が空で、何が渡ってきたか分からなかった）
+  var LS_GAS = 'tora_gas', LS_KEY = 'tora_key', LS_AUTOPLAY = 'tora_autoplay', LS_SINCE = 'tora_replies_since';
+  var $ = function (id) { return document.getElementById(id); };
+  var GAS = '', KEY = '', urlGas = '', urlKey = '';
+  // v1：返事の声を自動再生するか（既定 ON。localStorage に '0' で OFF）
+  var AUTOPLAY = true;
+  try { AUTOPLAY = localStorage.getItem(LS_AUTOPLAY) !== '0'; } catch (e) {}
+  (function loadSettings() {
+    var q = new URLSearchParams(location.search);
+    urlGas = normalizeGas(q.get('gas') || ''); urlKey = (q.get('k') || '').trim();
+    var saved = { gas: '', key: '' };
+    try { saved.gas = localStorage.getItem(LS_GAS) || ''; saved.key = localStorage.getItem(LS_KEY) || ''; } catch (e) {}
+    // URL の値を優先（GAS 側から開き直したときに新しい値で上書きできる）。URL の方が不正なら保存済みを使う
+    GAS = validGas(urlGas) ? urlGas : saved.gas;
+    KEY = urlKey || saved.key;
+    if (validGas(GAS) && KEY) { try { localStorage.setItem(LS_GAS, GAS); localStorage.setItem(LS_KEY, KEY); } catch (e) {} }
+  })();
+  // 手で保存したときも URL に付けておく（この状態で「ホーム画面に追加」すると設定込みになる）
+  function putSettingsInUrl(g, k) {
+    try { history.replaceState(null, '', location.pathname + '?gas=' + encodeURIComponent(g) + '&k=' + encodeURIComponent(k)); } catch (e) {}
+  }
+  function normalizeGas(u) { return (u || '').trim().replace(/^https:\/\/script\.google\.com\/a\/(macros\/)?[^/]+\/(macros\/)?s\//, 'https://script.google.com/macros/s/').replace(/\?.*$/, ''); }
+  function validGas(u) { return /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec$/.test(u); }
+
+  // ===== 画面 =====
+  var SECTIONS = ['secSettings', 'secRecord', 'secReview', 'secAudio', 'secDone'];
+  function show(sec) {
+    SECTIONS.forEach(function (s) { $(s).classList.toggle('hidden', s !== sec); });
+    window.scrollTo(0, 0);
+  }
+  function setStatus(msg, isRec) {
+    $('status').textContent = msg;
+    $('status').classList.toggle('rec', !!isRec);
+  }
+  function showErr(id, msg) { $(id).textContent = msg; $(id).classList.remove('hidden'); }
+
+  // ===== 送信（GAS の doPost へ）=====
+  // GAS はプリフライト（OPTIONS）に応えられないので、Content-Type を text/plain にして「単純リクエスト」で送る。
+  // GAS のウェブアプリは単純リクエストなら Access-Control-Allow-Origin:* を返すので返事（JSON）も読める。
+  // 返事が読めなかった（CORS で opaque／TypeError）ときも、電波があれば届いている見込みなので「届けました（返事は未確認）」にする。
+  // 自動では送り直さない（二重送信を避ける）。オフラインのときだけエラー（2026-10-22 の指示）。
+  // v1（2026-10-22）：Content-Type は付けない（fetch は文字列 body なら text/plain の単純リクエストになる。node で ACAO:* を確認済み）。
+  //   strict=true（replies／tts）のときは「読めなかった」を成功扱いにせず reject する（呼び元が JSONP に切り替える）
+  function postToGas(payload, strict) {
+    payload.k = KEY;
+    var body = JSON.stringify(payload);
+    return fetch(GAS, { method: 'POST', mode: 'cors', body: body, redirect: 'follow' })
+      .then(function (res) {
+        return res.text().then(function (t) {
+          var r = null;
+          try { r = JSON.parse(t); } catch (e) {}
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          if (!r) throw new Error('返事が JSON ではありません（デプロイの「アクセスできるユーザー」が「全員」か確認）');
+          if (r.ok === false) throw new Error(r.error || 'GAS 側でエラー');
+          return r;
+        }, function () { if (strict) throw new Error('opaque'); return { ok: true, unconfirmed: true }; });
+      }, function (err) {
+        if (navigator.onLine === false) throw new Error('オフラインです。電波のあるところでもう一度');
+        if (strict) throw new Error('unreadable');
+        return { ok: true, unconfirmed: true };
+      });
+  }
+  // JSONP（fetch の返事が読めない端末の予備。GAS の doGet ?action=replies|tts&callback=…）。submit は使わない（GET にしない）
+  var jsonpSeq = 0, useJsonp = false;
+  function jsonpToGas(payload) {
+    return new Promise(function (resolve, reject) {
+      var cb = 'toraCb' + (++jsonpSeq) + '_' + Date.now();
+      var qs = 'action=' + encodeURIComponent(payload.action) + '&k=' + encodeURIComponent(KEY) + '&callback=' + cb;
+      Object.keys(payload).forEach(function (key) { if (key !== 'action' && key !== 'k') qs += '&' + encodeURIComponent(key) + '=' + encodeURIComponent(String(payload[key])); });
+      var s = document.createElement('script');
+      var timer = setTimeout(function () { done(); reject(new Error('JSONP timeout')); }, 25000);
+      function done() { clearTimeout(timer); try { delete window[cb]; } catch (e) { window[cb] = undefined; } if (s.parentNode) s.parentNode.removeChild(s); }
+      window[cb] = function (r) { done(); if (!r || r.ok === false) reject(new Error((r && r.error) || 'GAS 側でエラー')); else resolve(r); };
+      s.onerror = function () { done(); reject(new Error('JSONP error')); };
+      s.src = GAS + '?' + qs;
+      document.head.appendChild(s);
+    });
+  }
+  // replies／tts：まず fetch、読めなければ JSONP（以後はその端末では JSONP を使い続ける）
+  function callGas(payload) {
+    if (useJsonp) return jsonpToGas(payload);
+    return postToGas(payload, true).catch(function (e) {
+      if (e && (e.message === 'opaque' || e.message === 'unreadable')) { useJsonp = true; return jsonpToGas(payload); }
+      throw e;
+    });
+  }
+  function doneScreen(r) {
+    var info = '';
+    if (r && r.at) info += r.at + ' に受付';
+    if (r && r.file) info += '（' + r.file + '）';
+    if (r && r.audio === true) info += ' 音声のまま届けました。文字になるのは次の定時処理（12:30／22:00）です';
+    if (r && r.unconfirmed) info += '返事は読めませんでしたが、届いている見込みです。心配なら Drive の work-inbox に 指示_… があるか見てください（無ければもう一度）';
+    $('doneInfo').textContent = info;
+    renderInstant(r);
+    show('secDone');
+  }
+
+  // ===== v1：トラの返事（即答の吹き出し／本返事の取り込み／声の再生）=====
+  var currentAudio = null;
+  function playWavBase64(b64) {
+    // 返り値：再生が始まれば resolve、ブラウザに止められたら reject（呼び元がボタンを出す）
+    return new Promise(function (resolve, reject) {
+      try {
+        if (currentAudio) { try { currentAudio.pause(); } catch (e) {} }
+        var a = new Audio('data:audio/wav;base64,' + b64);
+        currentAudio = a;
+        a.onended = function () { if (currentAudio === a) currentAudio = null; };
+        var p = a.play();
+        if (p && p.then) p.then(resolve, reject); else resolve();
+      } catch (e) { reject(e); }
+    });
+  }
+  // 吹き出しを 1 つ作る。audioB64 があれば即再生可、text だけなら「聞く」で GAS の tts を呼ぶ
+  function makeBubble(opts) {
+    var b = document.createElement('div'); b.className = 'bubble';
+    var who = document.createElement('p'); who.className = 'who'; who.textContent = opts.who || 'トラ';
+    if (opts.at) { var w = document.createElement('span'); w.className = 'when'; w.textContent = opts.at; who.appendChild(w); }
+    var txt = document.createElement('div'); txt.className = 'txt'; txt.textContent = opts.text || '';
+    var row = document.createElement('div'); row.className = 'row';
+    var btn = document.createElement('button'); btn.type = 'button'; btn.className = 'play'; btn.textContent = '聞く';
+    var note = document.createElement('span'); note.className = 'note'; note.textContent = opts.note || '';
+    row.appendChild(btn); row.appendChild(note);
+    b.appendChild(who); b.appendChild(txt); b.appendChild(row);
+    var audio = opts.audio || '';
+    function play() {
+      btn.disabled = true; note.textContent = audio ? '' : '声にしています…';
+      var get = audio ? Promise.resolve(audio) : callGas({ action: 'tts', text: opts.text }).then(function (r) { audio = r.audio || ''; if (!audio) throw new Error('声が空'); return audio; });
+      return get.then(function (b64) { return playWavBase64(b64); })
+        .then(function () { btn.disabled = false; btn.textContent = 'もう一度'; note.textContent = ''; })
+        .catch(function (e) { btn.disabled = false; btn.textContent = '聞く'; note.textContent = (e && e.name === 'NotAllowedError') ? 'ボタンを押すと声が出ます' : '声が出せませんでした（' + (e && e.message ? e.message : e) + '）'; throw e; });
+    }
+    btn.addEventListener('click', function () { play().catch(function () {}); });
+    b.play = play;
+    return b;
+  }
+  function renderInstant(r) {
+    var box = $('instantBox'); box.innerHTML = '';
+    if (!r || !r.reply) {
+      if (r && r.audio === true) return;   // 音声のまま送ったときは即答なし
+      var wait = document.createElement('div'); wait.className = 'bubble wait';
+      wait.textContent = r && r.unconfirmed ? 'トラの即答は受け取れませんでした（本返事はこの下に届きます）' : 'トラの即答はありませんでした' + (r && r.replyError ? '（' + r.replyError + '）' : '');
+      box.appendChild(wait);
+      return;
+    }
+    var b = makeBubble({ who: 'トラ（即答）', text: r.reply, audio: r.audio || '', note: r.audio ? '' : (r.replyError ? '声は出せませんでした' : '') });
+    box.appendChild(b);
+    if (AUTOPLAY && r.audio) b.play().catch(function () {});
+  }
+  // 本返事：since（最後に読んだファイル名）より新しいものを取る。初回は今日の分だけ（古い返事を延々読まない）
+  var since = '';
+  try { since = localStorage.getItem(LS_SINCE) || ''; } catch (e) {}
+  if (!since) { var d = new Date(); since = d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2) + '_0000'; }
+  var polling = false, pollTimer = null, pollBusy = false;
+  function pollReplies() {
+    if (pollBusy || !validGas(GAS) || !KEY) return;
+    if (document.visibilityState && document.visibilityState !== 'visible') return;
+    pollBusy = true;
+    callGas({ action: 'replies', since: since })
+      .then(function (r) {
+        var list = (r && r.replies) || [];
+        if (!list.length) { $('replyStatus').textContent = ''; return; }
+        var last = null;
+        list.forEach(function (x) {
+          var b = makeBubble({ who: 'トラ', at: x.at || '', text: x.text || '(本文なし)' });
+          $('replyList').appendChild(b);
+          last = b;
+          if (x.name > since) since = x.name;
+        });
+        try { localStorage.setItem(LS_SINCE, since); } catch (e) {}
+        $('secReplies').classList.remove('hidden');
+        $('replyStatus').textContent = r.more ? '（まだ続きがあります。30 秒後に取ります）' : '';
+        if (AUTOPLAY && last) last.play().catch(function () {});
+        if (r.more) setTimeout(pollReplies, 3000);
+      })
+      .catch(function (e) { $('replyStatus').textContent = '返事の確認に失敗（' + (e && e.message ? e.message : e) + '）。30 秒後にもう一度'; if ($('replyList').children.length) $('secReplies').classList.remove('hidden'); })
+      .then(function () { pollBusy = false; });
+  }
+  function startPolling() {
+    if (polling) return;
+    polling = true;
+    pollReplies();
+    pollTimer = setInterval(pollReplies, 30000);
+    document.addEventListener('visibilitychange', function () { if (document.visibilityState === 'visible') pollReplies(); });
+  }
+
+  // ===== 音声認識（Web Speech API）=====
+  var SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  // 認識の状態（2026-10-22 14:45 の Android Chrome の不具合＝同じ文が 10 回以上積み上がる・止まらない、を受けて作り直し）
+  //  - Android Chrome は continuous モードで、resultIndex が 0 のまま final 済みの結果を何度も onresult で返す。
+  //    「resultIndex 以降を追記」だと毎回同じ文が足される → 毎回 e.results 全体から組み立て直す（final は sessionFinal、interim は置き換え）
+  //  - ブラウザが勝手に切ったとき（Android は 1 分弱、iPhone は無音）だけ再開する。再開前のセッション分は committed に確定
+  //  - 「止める」は stopRequested を立ててから stop()。onend は stopRequested なら再開しない。stop() が効かない端末向けに 0.7 秒で abort()
+  var rec = null, listening = false, committed = '', sessionFinal = '', interim = '', stopRequested = false, reviewed = false, lastCommitted = '';
+  function allText() { var f = sessionFinal.trim(); if (f === lastCommitted) f = ''; return (committed + (f ? (committed ? ' ' : '') + f : '') + (interim ? ' ' + interim : '')).trim(); }
+  function renderLive() {
+    var el = $('live');
+    el.innerHTML = '';
+    var fixed = (committed + sessionFinal);
+    if (fixed) el.appendChild(document.createTextNode(fixed));
+    if (interim) { var s = document.createElement('span'); s.className = 'interim'; s.textContent = (fixed ? ' ' : '') + interim; el.appendChild(s); }
+  }
+  function startListening() {
+    var me = new SR();   // 古いインスタンスのイベントが新しい回に混ざらないよう、各ハンドラで me === rec を確認する
+    rec = me;
+    me.lang = 'ja-JP';
+    // Android の Chrome は continuous=true だと同じ結果を何度も final として返す（重複の原因）。
+    // continuous=false で「1 回の発話＝1 つの確定」にし、onend で自動的に次の認識を始めてつなぐ
+    me.continuous = false;
+    me.interimResults = true;
+    me.maxAlternatives = 1;
+    reviewed = false;
+    me.onresult = function (e) {
+      if (me !== rec) return;
+      // 毎回ゼロから組み立てる。interim は置き換え。同じ final が続けて 2 つ並んでいたら 1 つに（Android の癖）
+      sessionFinal = ''; interim = ''; var prev = '';
+      for (var i = 0; i < e.results.length; i++) {
+        var t = (e.results[i][0].transcript || '').trim();
+        if (!t) continue;
+        if (e.results[i].isFinal) { if (t !== prev) sessionFinal += t; prev = t; } else interim += t;
+      }
+      renderLive();
+    };
+    me.onerror = function (e) {
+      if (me !== rec) return;
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        setStatus('マイクの許可がありません。ブラウザの設定でこのサイトのマイクを許可してください');
+        $('hintNoSpeech').textContent = '許可できないときは「文字で打つ」から送れます。';
+        if (MR) { useRecorder = true; $('hintNoSpeech').textContent += ' もう一度「話す」を押すと録音方式で試します。'; }
+        stopRequested = true;
+      } else if (e.error === 'no-speech' || e.error === 'aborted') {
+        // 無音・中断。止める操作をしていなければ onend で再開する
+      } else if (e.error === 'network') {
+        setStatus('音声認識サービスにつながりません（network）。もう一度押すと録音方式で試します');
+        if (MR) useRecorder = true;
+        stopRequested = true;
+      } else {
+        setStatus('音声認識でエラー（' + e.error + '）。もう一度試すか「文字で打つ」で');
+        stopRequested = true;
+      }
+    };
+    me.onend = function () {
+      if (me !== rec) return;
+      // 1 回分の確定を committed に足す（直前と同じ文なら捨てる＝Android の重複対策）。「止める」のあとは再開しない
+      var f = sessionFinal.trim();
+      if (f && f !== lastCommitted) { committed += (committed ? ' ' : '') + f; lastCommitted = f; }
+      sessionFinal = ''; interim = ''; renderLive();
+      if (listening && !stopRequested) {
+        try { me.start(); return; } catch (err) { /* 続行不可なら止める */ }
+      }
+      finishListening();
+    };
+    try {
+      committed = ''; sessionFinal = ''; interim = ''; lastCommitted = ''; renderLive();
+      me.start();
+      listening = true; stopRequested = false;
+      $('btnMic').classList.add('rec'); $('btnMic').textContent = '止める';
+      setStatus('聞いています… 話し終わったらもう一度押す', true);
+    } catch (err) {
+      setStatus('音声認識を始められませんでした。「文字で打つ」で送れます');
+    }
+  }
+  function stopListening() {
+    var me = rec;
+    stopRequested = true;
+    listening = false;
+    $('btnMic').disabled = true;
+    setStatus('まとめています…', true);
+    try { me.stop(); } catch (err) {}
+    // Android で stop() が効かない（onend が来ない）ことがあるので、0.7 秒待って終わっていなければ強制終了
+    setTimeout(function () { if (!reviewed && me === rec) { try { me.abort(); } catch (err) {} finishListening(); } }, 700);
+  }
+  function finishListening() {
+    if (reviewed) return;
+    reviewed = true;
+    stopUI();
+    if (allText()) goReview(); else setStatus('声が聞こえませんでした。もう一度押して話してください');
+  }
+  function stopUI() {
+    listening = false;
+    $('btnMic').disabled = false;
+    $('btnMic').classList.remove('rec'); $('btnMic').textContent = '話す';
+    if (!$('status').classList.contains('rec')) return;
+    setStatus('ボタンを押して話す（もう一度押すと止まる）');
+  }
+  function goReview() {
+    var t = allText();
+    if (t) {
+      var cur = $('text').value.trim();
+      $('text').value = cur ? cur + '\n' + t : t;
+    }
+    committed = ''; sessionFinal = ''; interim = ''; renderLive();
+    $('err').classList.add('hidden');
+    show('secReview');
+  }
+  function sendText() {
+    var t = $('text').value.trim();
+    if (!t) { showErr('err', '本文が空です'); return; }
+    if (t.length > 20000) { showErr('err', '長すぎます（20,000 文字まで）'); return; }
+    $('btnSend').disabled = true; $('btnSend').textContent = '送っています…（トラの即答も一緒に届きます。10 秒ほど）';
+    $('err').classList.add('hidden');
+    postToGas({ action: 'submit', text: t })
+      .then(function (r) {
+        $('btnSend').disabled = false; $('btnSend').textContent = 'トラに送る';
+        $('text').value = '';
+        doneScreen(r);
+      })
+      .catch(function (e) {
+        $('btnSend').disabled = false; $('btnSend').textContent = 'トラに送る';
+        showErr('err', '送れませんでした：' + (e && e.message ? e.message : e) + '。電波を確認してもう一度');
+      });
+  }
+
+  // ===== 録音（MediaRecorder。音声認識が無い／拒否された端末の予備）=====
+  var MR = window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? window.MediaRecorder : null;
+  var useRecorder = !SR && !!MR;
+  var recorder = null, chunks = [], recStart = 0, recTimer = null, audioBlob = null, audioMime = '';
+  function pickMime() {
+    var cands = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus', 'audio/ogg', 'audio/wav'];
+    for (var i = 0; i < cands.length; i++) { if (MR.isTypeSupported && MR.isTypeSupported(cands[i])) return cands[i]; }
+    return '';
+  }
+  function startRecording() {
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
+      chunks = []; audioBlob = null;
+      audioMime = pickMime();
+      recorder = audioMime ? new MR(stream, { mimeType: audioMime }) : new MR(stream);
+      audioMime = recorder.mimeType || audioMime || 'audio/webm';
+      recorder.ondataavailable = function (e) { if (e.data && e.data.size) chunks.push(e.data); };
+      recorder.onstop = function () {
+        stream.getTracks().forEach(function (t) { t.stop(); });
+        clearInterval(recTimer);
+        listening = false;
+        $('btnMic').classList.remove('rec'); $('btnMic').textContent = '話す';
+        setStatus('ボタンを押して話す（もう一度押すと止まる）');
+        audioBlob = new Blob(chunks, { type: audioMime });
+        if (!audioBlob.size) { setStatus('録音が空でした。もう一度押して話してください'); return; }
+        $('audioLen').textContent = Math.round((Date.now() - recStart) / 1000);
+        $('audioPreview').src = URL.createObjectURL(audioBlob);
+        $('errAudio').classList.add('hidden');
+        show('secAudio');
+      };
+      recorder.start(1000);
+      listening = true; recStart = Date.now();
+      $('btnMic').classList.add('rec'); $('btnMic').textContent = '止める';
+      setStatus('録音しています… 0 秒（話し終わったらもう一度押す）', true);
+      recTimer = setInterval(function () {
+        var s = Math.round((Date.now() - recStart) / 1000);
+        setStatus('録音しています… ' + s + ' 秒（話し終わったらもう一度押す）', true);
+        if (s >= 600) stopRecording();   // 10 分で自動停止（GAS の POST 上限に余裕を残す）
+      }, 1000);
+    }).catch(function (err) {
+      setStatus('マイクを使えませんでした（' + (err && err.name ? err.name : err) + '）。「文字で打つ」→ キーボードのマイクで送れます');
+      $('hintNoSpeech').textContent = 'iPhone：設定 → Safari → マイク。Android：Chrome のサイト設定 → マイク。';
+    });
+  }
+  function stopRecording() { if (recorder && recorder.state !== 'inactive') recorder.stop(); }
+  function sendAudio() {
+    if (!audioBlob) return;
+    $('btnSendAudio').disabled = true; $('btnSendAudio').textContent = '送っています…';
+    $('errAudio').classList.add('hidden');
+    var fr = new FileReader();
+    fr.onload = function () {
+      var b64 = String(fr.result).split(',')[1] || '';
+      postToGas({ action: 'audio', audio: b64, mime: audioMime, seconds: Number($('audioLen').textContent) })
+        .then(function (r) {
+          $('btnSendAudio').disabled = false; $('btnSendAudio').textContent = '音声のまま送る';
+          audioBlob = null;
+          doneScreen(r);
+        })
+        .catch(function (e) {
+          $('btnSendAudio').disabled = false; $('btnSendAudio').textContent = '音声のまま送る';
+          showErr('errAudio', '送れませんでした：' + (e && e.message ? e.message : e) + '。電波を確認してもう一度');
+        });
+    };
+    fr.readAsDataURL(audioBlob);
+  }
+
+  // ===== ボタン =====
+  $('btnMic').addEventListener('click', function () {
+    if (useRecorder) { listening ? stopRecording() : startRecording(); }
+    else { listening ? stopListening() : startListening(); }
+  });
+  $('btnToEdit').addEventListener('click', function () {
+    if (listening) { useRecorder ? stopRecording() : stopListening(); } else { goReview(); }
+  });
+  $('btnSend').addEventListener('click', sendText);
+  $('btnMore').addEventListener('click', function () { show('secRecord'); useRecorder ? startRecording() : startListening(); });
+  // 「消す」：本文を空にして同じ画面に残る（続きを話す／文字で打つ、どちらにも進める）
+  $('btnClear').addEventListener('click', function () { $('text').value = ''; committed = ''; sessionFinal = ''; interim = ''; renderLive(); $('err').classList.add('hidden'); $('text').focus(); });
+  $('btnSendAudio').addEventListener('click', sendAudio);
+  $('btnResetAudio').addEventListener('click', function () { audioBlob = null; show('secRecord'); setStatus('ボタンを押して話す（もう一度押すと止まる）'); });
+  $('btnAgain').addEventListener('click', function () { show('secRecord'); setStatus('ボタンを押して話す（もう一度押すと止まる）'); });
+  $('btnSettings').addEventListener('click', function () { $('inGas').value = GAS; $('inKey').value = KEY; $('inAutoplay').checked = AUTOPLAY; show('secSettings'); });
+  $('btnSaveSettings').addEventListener('click', function () {
+    var g = normalizeGas($('inGas').value), k = $('inKey').value.trim();
+    if (!validGas(g)) { showErr('errSettings', 'URL は https://script.google.com/macros/s/…/exec の形です'); return; }
+    if (!k) { showErr('errSettings', '鍵が空です'); return; }
+    GAS = g; KEY = k;
+    AUTOPLAY = !!$('inAutoplay').checked;
+    try { localStorage.setItem(LS_GAS, g); localStorage.setItem(LS_KEY, k); localStorage.setItem(LS_AUTOPLAY, AUTOPLAY ? '1' : '0'); } catch (e) {}
+    putSettingsInUrl(g, k);
+    $('errSettings').classList.add('hidden');
+    show('secRecord');
+    startPolling();
+  });
+  // 「消す」：表示だけ消す（既読の位置はそのまま）
+  $('btnClearReplies').addEventListener('click', function () { $('replyList').innerHTML = ''; $('replyStatus').textContent = ''; $('secReplies').classList.add('hidden'); });
+
+  // ===== 起動 =====
+  if (!SR && !MR) {
+    $('btnMic').disabled = true;
+    setStatus('このブラウザは音声入力が使えません');
+    $('hintNoSpeech').textContent = '「文字で打つ」→ キーボードのマイクで話せます。';
+    $('btnToEdit').className = 'btn primary';
+  } else if (useRecorder) {
+    $('hintNoSpeech').textContent = 'この端末は録音方式です（音声ファイルを送り、GEEKOM で文字にします）。';
+  }
+  if (!validGas(GAS) || !KEY) {
+    // 設定が足りない：URL で来た値（不正でも）を欄に出して、何が渡ってきたか分かるようにする
+    $('inGas').value = GAS || urlGas; $('inKey').value = KEY || urlKey;
+    if (urlGas && !validGas(urlGas)) showErr('errSettings', 'GAS から渡された URL が …/exec の形ではありません（' + urlGas + '）。GAS のスクリプトプロパティ WEBAPP_URL に /exec の URL を入れると直ります。ここで手で直してもよいです');
+    $('inAutoplay').checked = AUTOPLAY;
+    show('secSettings');
+  } else { show('secRecord'); startPolling(); }
+</script>
+</body>
+</html>
