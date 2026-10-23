@@ -75,6 +75,9 @@
   #briefBox .mini[disabled] { opacity:.5; }
   #briefBox .mini.ghost { border-color:var(--line); color:var(--sub); font-weight:500; }
   #briefBox .note { font-size:12px; color:var(--sub); }
+  #briefText { margin-top:8px; padding-top:8px; border-top:1px dashed #f3c9ad; font-size:14px; line-height:1.7; max-height:50vh; overflow-y:auto; }
+  #briefText p { margin:0 0 10px; }
+  #briefText p:last-child { margin-bottom:0; }
   @keyframes blink { 0%,100%{opacity:.2} 50%{opacity:1} }
   /* ---- 下のバー ---- */
   footer { flex:none; background:#fff; border-top:1px solid var(--line); padding:10px 12px calc(10px + env(safe-area-inset-bottom)); }
@@ -164,7 +167,7 @@
     </div>
     <p class="hint">GAS 側の「トラに話す」画面の上にある「マイク対応の画面へ」から開くと、この 2 つは自動で入ります。</p>
     <label class="toggle"><input type="checkbox" id="inLiveVoice" checked> 通話中、トラの声を出す（切ると文字だけ）</label>
-    <label class="toggle"><input type="checkbox" id="inAutoplay" checked> 実行役のトラからの返事を自動で読み上げる</label>
+    <label class="toggle"><input type="checkbox" id="inAutoplay" checked> トラの返事（作業が終わったあとの本返事）を自動で読み上げる</label>
     <p class="hint">スマホが自動再生を止めたときは、吹き出しの「聞く」で。</p>
     <button class="btn primary" id="btnSaveSettings" type="button">保存して始める</button>
     <button class="btn ghost" id="btnClearChat" type="button">この画面の履歴を消す</button>
@@ -180,10 +183,13 @@
         <audio id="briefAudio" controls preload="metadata"></audio>
         <div class="row">
           <button class="mini" id="btnBriefPlay" type="button">▶ 聞く</button>
+          <button class="mini ghost" id="btnBriefText" type="button">テキストで読む</button>
           <button class="mini ghost" id="btnBriefPrev" type="button">前の日の分を聞く</button>
           <span class="note" id="briefNote"></span>
         </div>
         <div class="row hidden" id="briefPrevList"></div>
+        <!-- 「テキストで読む」：GAS {action:'brief_text'} で本文を段落ごとに。もう一度押すと閉じる（2026-10-23 実機テストの指摘 1） -->
+        <div id="briefText" class="hidden"></div>
       </div>
     </div>
     <main id="chat"></main>
@@ -208,7 +214,7 @@
       </div>
       <!-- 通話をまとめずに切ったとき -->
       <div class="composer hidden" id="endPrompt">
-        <p class="hint">依頼をまとめる前に終わりました。会話の文字起こしをそのまま実行役のトラに送りますか？</p>
+        <p class="hint">依頼をまとめる前に終わりました。会話の文字起こしをそのままトラに渡しますか？（トラが読んで手元で進めます）</p>
         <div class="row">
           <button class="btn primary" id="btnSendTranscript" type="button">文字起こしを送る</button>
           <button class="btn ghost" id="btnDiscard" type="button">送らない</button>
@@ -383,10 +389,10 @@
   function renderHistory() {
     $('chat').innerHTML = '';
     chatLog.slice(-50).forEach(function (h) { addMsg(h.side, h.text, { who: h.who, at: h.at, url: h.url, tts: h.tts, card: h.card, persist: false }); });
-    if (!chatLog.length) addMsg('sys', '「話す」を押すとトラとの通話が始まります。終わりに「以上」と言うと、依頼をまとめて実行役のトラに送ります。', { persist: false });
+    if (!chatLog.length) addMsg('sys', '「話す」を押すとトラとの通話が始まります。終わりに「以上」と言うと、トラが依頼をまとめて、通話のあとに手元で進めます。', { persist: false });
   }
 
-  // ===== 実行役のトラからの本返事（v1）。開いている間 30 秒おきに GAS の replies を見て吹き出しに足す =====
+  // ===== トラの本返事（v1。手元の作業が終わったあとに届く）。開いている間 30 秒おきに GAS の replies を見て吹き出しに足す =====
   var since = '';
   try { since = localStorage.getItem(LS_SINCE) || ''; } catch (e) {}
   if (!since) { var d0 = new Date(); since = d0.getFullYear() + '-' + ('0' + (d0.getMonth() + 1)).slice(-2) + '-' + ('0' + d0.getDate()).slice(-2) + '_0000'; }
@@ -401,7 +407,7 @@
         if (!list.length) return;
         var last = null;
         list.forEach(function (x) {
-          last = addMsg('tora', x.text || '(本文なし)', { who: 'トラ（実行役）', at: x.at || nowHM(), tts: true });
+          last = addMsg('tora', x.text || '(本文なし)', { who: 'トラ', at: x.at || nowHM(), tts: true });
           if (x.name > since) since = x.name;
         });
         try { localStorage.setItem(LS_SINCE, since); } catch (e) {}
@@ -421,7 +427,7 @@
 
   // ===== 朝ブリーフ（2026-10-23）。起動時に GAS の brief を今日の日付で取り、あればカードを出す。playBrief の toolCall でも同じカードを自動再生 =====
   // 音声は base64 → Blob → ObjectURL を <audio> に（標準コントロールで進む・止める）。日付ごとに ObjectURL を手元に持つ（同じ日を 2 回取らない）
-  var brief = { date: '', urls: {}, available: [], loading: false, today: '' };
+  var brief = { date: '', urls: {}, texts: {}, textDate: '', available: [], loading: false, today: '' };
   (function () { var d = new Date(); brief.today = d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); })();
   function mmss(sec) { sec = Math.max(0, Math.round(sec || 0)); return ('0' + Math.floor(sec / 60)).slice(-2) + ':' + ('0' + (sec % 60)).slice(-2); }
   function briefLabel(date) {
@@ -442,6 +448,30 @@
     $('btnBriefPlay').textContent = '▶ 聞く';
     $('briefBox').classList.remove('hidden');
     renderBriefPrev();
+    if (brief.textDate && brief.textDate !== date) hideBriefText();   // 別の日に切り替えたら本文は閉じる（次に押すとその日の分を取る）
+  }
+  // 「テキストで読む」：本文（段落）は日付ごとに手元に持つ。開いていれば閉じる
+  function hideBriefText() { $('briefText').classList.add('hidden'); $('btnBriefText').textContent = 'テキストで読む'; }
+  function showBriefText(date, paragraphs) {
+    var box = $('briefText'); box.innerHTML = '';
+    (paragraphs && paragraphs.length ? paragraphs : ['（本文が空でした）']).forEach(function (t) { var p = document.createElement('p'); p.textContent = t; box.appendChild(p); });
+    box.classList.remove('hidden'); brief.textDate = date;
+    $('btnBriefText').textContent = '閉じる';
+  }
+  function toggleBriefText() {
+    if (!$('briefText').classList.contains('hidden')) { hideBriefText(); return; }
+    var date = brief.date || '';
+    if (brief.texts[date]) { showBriefText(date, brief.texts[date]); return; }
+    $('btnBriefText').disabled = true; $('briefNote').textContent = '本文を取りに行っています…';
+    callGas({ action: 'brief_text', date: date })
+      .then(function (r) {
+        $('btnBriefText').disabled = false; $('briefNote').textContent = '';
+        if (!r || !r.found) { $('briefNote').textContent = (r && r.date ? r.date : 'その日') + ' の本文はまだありません'; return; }
+        brief.texts[r.date] = r.paragraphs || (r.text ? String(r.text).split(/\n\s*\n/) : []);
+        if (date && r.date !== date) brief.texts[date] = brief.texts[r.date];
+        showBriefText(r.date, brief.texts[r.date]);
+      })
+      .catch(function (e) { $('btnBriefText').disabled = false; $('briefNote').textContent = '本文を取れませんでした（' + (e && e.message ? e.message : e) + '）'; });
   }
   function renderBriefPrev() {
     var box = $('briefPrevList'); box.innerHTML = '';
@@ -500,6 +530,7 @@
   $('briefAudio').addEventListener('loadedmetadata', function () { var d = $('briefAudio').duration; if (isFinite(d) && d > 0) $('briefLen').textContent = '（' + mmss(d) + '）'; });
   $('briefAudio').addEventListener('ended', function () { $('btnBriefPlay').textContent = '▶ もう一度'; });
   $('btnBriefPlay').addEventListener('click', function () { var a = $('briefAudio'); a.currentTime = 0; playBriefAudio(); });
+  $('btnBriefText').addEventListener('click', toggleBriefText);
   $('btnBriefPrev').addEventListener('click', function () { renderBriefPrev(); $('briefPrevList').classList.toggle('hidden'); });
   // Live の道具 playBrief：会話側トラは「流しますね」と言うだけ。ここで brief を取って流し、結果は SILENT（トラがさらに喋らないように）
   function doPlayBrief(fc) {
@@ -710,20 +741,20 @@
         toolResponse(fc, { ok: false, error: String(e && e.message ? e.message : e), scheduling: 'INTERRUPT' });
       });
   }
-  // 会話の終わり：まとめを実行役のトラに送る（v1 と同じ submit。即答は付かない）
+  // 会話の終わり：まとめをトラの手元（作業用の控え）に置く（v1 と同じ submit。即答は付かない）。画面の文言に「実行役」「送る」「30 分」は出さない（2026-10-23 指摘 3）
   function doSendRequests(fc) {
     var summary = String((fc.args && fc.args.summary) || '').trim();
-    var sys = addMsg('sys', '実行役のトラに送っています…', { persist: false });
+    var sys = addMsg('sys', '依頼を控えています…', { persist: false });
     postToGas({ action: 'submit', text: transcriptText(), summary: summary }, false)
       .then(function (r) {
         live.sent = true;
         sys.remove();
-        addMsg('me', summary, { who: '春木さん → 実行役のトラ', card: true });
-        addMsg('sys', (r.unconfirmed ? '送りました（返事は未確認）' : '送りました ' + (r.at || '') + (r.file ? '（' + r.file + '）' : '')) + '。実行役のトラの返事はこの画面に届きます', { persist: true });
+        addMsg('me', summary, { who: '春木さん → トラ（依頼のまとめ）', card: true });
+        addMsg('sys', (r.unconfirmed ? '承りました（控えの確認は未了）' : '承りました ' + (r.at || '') + (r.file ? '（' + r.file + '）' : '')) + '。トラが手元で進めて、終わったらこの画面に知らせます', { persist: true });
         toolResponse(fc, { ok: true, result: 'sent', file: r.file || '' });
       })
       .catch(function (e) {
-        sys.setText('送れませんでした：' + (e && e.message ? e.message : e));
+        sys.setText('控えられませんでした：' + (e && e.message ? e.message : e));
         toolResponse(fc, { ok: false, error: String(e && e.message ? e.message : e) });
       });
   }
@@ -756,7 +787,7 @@
     postToGas({ action: 'submit', text: '（通話の文字起こし。まとめ無し）\n' + t }, false)
       .then(function (r) {
         $('btnSendTranscript').disabled = false; $('endPrompt').classList.add('hidden');
-        addMsg('sys', '文字起こしを送りました ' + (r.at || '') + (r.file ? '（' + r.file + '）' : ''), { persist: true });
+        addMsg('sys', '文字起こしを渡しました ' + (r.at || '') + (r.file ? '（' + r.file + '）' : '') + '。トラが読んで手元で進めます', { persist: true });
         if (r.reply) { var b = addMsg('tora', r.reply, { who: 'トラ（即答）', audio: r.audio || '', tts: true }); if (AUTOPLAY && r.audio) b.play().catch(function () {}); }
         live.transcript = [];
       })
@@ -821,7 +852,7 @@
         $('btnSend').disabled = false; $('btnSend').textContent = 'トラに送る';
         $('text').value = ''; baseText = '';
         addMsg('me', t, {});
-        addMsg('sys', (r.unconfirmed ? '届けました（返事は未確認。心配なら Drive の work-inbox を見る）' : '届けました ' + (r.at || '') + (r.file ? '（' + r.file + '）' : '')) + '。30 分以内に実行役のトラが動きます', { persist: true });
+        addMsg('sys', (r.unconfirmed ? '承りました（受け取りの確認は未了。心配なら Drive の work-inbox を見る）' : '承りました ' + (r.at || '') + (r.file ? '（' + r.file + '）' : '')) + '。トラが手元で進めて、終わったらこの画面に知らせます', { persist: true });
         if (r.reply) { var b = addMsg('tora', r.reply, { who: 'トラ（即答）', audio: r.audio || '', tts: true }); if (AUTOPLAY && r.audio) b.play().catch(function () {}); }
         else if (!r.unconfirmed) addMsg('sys', 'トラの即答はありませんでした' + (r.replyError ? '（' + r.replyError + '）' : ''), { persist: false });
         $('composer').classList.add('hidden');
