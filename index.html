@@ -120,6 +120,15 @@
   .ritem { background:#fff; border:1px solid var(--line); border-radius:14px; padding:10px 12px; cursor:pointer; }
   .ritem.urgent { border-color:#f3a0a0; background:#fff6f6; }
   .ritem.toall { opacity:.85; }
+  /* 送信待ちカード（春木さんの指示で作った Chatwork の依頼。2026-10-23 19:29 決定）：返信待ちと見分けがつく色 */
+  .ritem.outbound { border-color:#8fb7e8; background:#f3f8ff; }
+  .ritem .tag.o { color:#1d4ed8; }
+  #rDetail .pick { display:flex; flex-direction:column; gap:6px; background:#f6f7f9; border-radius:8px; padding:8px; }
+  #rDetail .pick input { padding:9px; font-size:15px; width:auto; }
+  #rDetail .pick .cand { display:flex; flex-direction:column; gap:4px; max-height:200px; overflow-y:auto; }
+  #rDetail .pick .cand button { text-align:left; border:1px solid var(--line); background:#fff; border-radius:8px; padding:8px 10px; font-size:13px; line-height:1.4; }
+  #rDetail .pick .cand button.on { border-color:#1d4ed8; background:#e8f0fe; }
+  #rDetail .rcpt .lnk { color:#1d4ed8; text-decoration:underline; cursor:pointer; margin-left:6px; font-size:12px; }
   .ritem .top { display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--sub); }
   .ritem .tag { font-weight:600; }
   .ritem .tag.u { color:var(--rec); }
@@ -943,34 +952,46 @@
     rq.loading = true;
     return callGas({ action: 'replies_queue' }).then(function (r) {
       rq.loading = false; rq.items = (r && r.items) || []; rq.count = (r && r.count) || null;
-      setBadge(rq.count ? rq.count.open : 0);
+      setBadge(rq.count ? (rq.count.open || 0) + (rq.count.outbound || 0) : 0);   // 送信待ち（春木さんの指示）もバッジに数える
       if (!rq.cur) renderQueue();
     }, function (e) { rq.loading = false; if (!silent) showErr('rErr', '一覧を取れませんでした（' + (e && e.message ? e.message : e) + '）。GAS が新バージョンか確認'); });
   }
   function renderQueue() {
     var box = $('rList'); box.innerHTML = ''; $('rDetail').classList.add('hidden'); $('rErr').classList.add('hidden');
     if (!rq.items.length) { box.innerHTML = '<div class="msg sys">返信待ちはありません' + (rq.count ? '（' + (rq.count.at || '') + ' 時点）' : '') + '</div>'; return; }
-    var groups = [['急ぎ', 0], ['返事が要るもの', 1], ['全員宛て・返信任意', 2], ['返事が要るか不明', 3], ['あとで', 4]];
+    // -1＝送信待ち（春木さんの指示で作った Chatwork の依頼。開いて「Chatwork に送る」。2026-10-23 19:29 決定）
+    var groups = [['送信待ち（春木さんの指示）', -1], ['急ぎ', 0], ['返事が要るもの', 1], ['全員宛て・返信任意', 2], ['返事が要るか不明', 3], ['あとで', 4]];
     groups.forEach(function (g) {
       var list = rq.items.filter(function (it) { return it.order === g[1]; });
       if (!list.length) return;
       var h = document.createElement('div'); h.className = 'group'; h.textContent = g[0] + '（' + list.length + '）'; box.appendChild(h);
       list.forEach(function (it) {
-        var d = document.createElement('div'); d.className = 'ritem' + (it.urgent ? ' urgent' : '') + (it.toall ? ' toall' : '');
-        d.innerHTML = '<div class="top"><span><span class="tag' + (it.urgent ? ' u' : '') + '">' + (it.urgent ? '急ぎ' : (it.kind || '')) + '</span> · ' + (it.src === 'chatwork' ? 'Chatwork' : 'Gmail') + (it.business ? ' · ' + esc(it.business) : '') + '</span><span>' + esc((it.detectedAt || '').slice(5, 16)) + '</span></div>' +
-          '<div class="subj">' + esc(it.subject || '（件名なし）') + '</div><div class="sum">' + esc(it.from) + (it.summary ? ' — ' + esc(it.summary) : '') + '</div>';
+        var ob = it.kind === 'outbound';
+        var d = document.createElement('div'); d.className = 'ritem' + (it.urgent ? ' urgent' : '') + (it.toall ? ' toall' : '') + (ob ? ' outbound' : '');
+        d.innerHTML = '<div class="top"><span><span class="tag' + (it.urgent ? ' u' : ob ? ' o' : '') + '">' + (ob ? '送信待ち' : it.urgent ? '急ぎ' : (it.kind || '')) + '</span> · ' + (ob || it.src === 'chatwork' ? 'Chatwork' : 'Gmail') + (it.business ? ' · ' + esc(it.business) : '') + '</span><span>' + esc((it.detectedAt || '').slice(5, 16)) + '</span></div>' +
+          (ob ? '<div class="subj">送信待ち：' + esc(outboundTo(it)) + ' 宛て</div><div class="sum">' + esc(it.subject || '') + (it.summary ? ' — ' + esc(it.summary) : '') + '</div>'
+              : '<div class="subj">' + esc(it.subject || '（件名なし）') + '</div><div class="sum">' + esc(it.from) + (it.summary ? ' — ' + esc(it.summary) : '') + '</div>');
         d.addEventListener('click', function () { openItem(it); });
         box.appendChild(d);
       });
     });
   }
+  // 送信待ちカードの相手の名前（画面で選び直した候補 → JSON の to → 未定）
+  function outboundTo(it) {
+    if (it._pick && it._pick.name) return it._pick.name + (it._pick.kind === 'group' ? '（グループ）' : ' さん');
+    if (it.to && it.to.length) return it.to[0] + ' さん';
+    return '相手が未定（候補から選ぶ）';
+  }
   function openItem(it) {
     rq.cur = it;
+    var ob = it.kind === 'outbound';
     var box = $('rDetail'); box.classList.remove('hidden'); $('rList').classList.add('hidden'); $('rErr').classList.add('hidden');
     var h = '<button class="btn ghost" id="rBack" type="button" style="width:auto;padding:8px 12px">← 一覧へ</button>' +
-      '<h2>' + esc(it.subject || '（件名なし）') + '</h2>' +
-      '<div class="meta">' + esc(it.from) + ' · ' + (it.src === 'chatwork' ? 'Chatwork' : 'Gmail') + ' · ' + esc(it.kind) + (it.urgent ? ' · <b style="color:var(--rec)">急ぎ</b>' : '') + (it.toall ? ' · 全員宛て（返信任意）' : '') + (it.link ? ' · <a href="' + esc(it.link) + '" target="_blank" rel="noopener">開く</a>' : '') + '</div>' +
-      '<div class="rcpt" id="rRcpt">' + esc(rcptText(it, null)) + '</div>' +
+      '<h2>' + (ob ? '送信待ち：' + esc(outboundTo(it)) + ' 宛て' : esc(it.subject || '（件名なし）')) + '</h2>' +
+      (ob ? '<div class="meta">春木さんの指示（' + esc(it.source || '') + '）· Chatwork · ' + esc(it.subject || '') + '<br>まだ送っていません。文面と相手を確認して「Chatwork に送る」を押すと送ります</div>'
+          : '<div class="meta">' + esc(it.from) + ' · ' + (it.src === 'chatwork' ? 'Chatwork' : 'Gmail') + ' · ' + esc(it.kind) + (it.urgent ? ' · <b style="color:var(--rec)">急ぎ</b>' : '') + (it.toall ? ' · 全員宛て（返信任意）' : '') + (it.link ? ' · <a href="' + esc(it.link) + '" target="_blank" rel="noopener">開く</a>' : '') + '</div>') +
+      '<div class="rcpt" id="rRcpt">' + esc(rcptText(it, null)) + (ob ? '<span class="lnk" id="rPickOpen">' + (it.to && it.to.length ? '別の人にする' : '相手を選ぶ') + '</span>' : '') + '</div>' +
+      (ob ? '<div class="pick hidden" id="rPick"><input id="rPickQ" type="text" autocomplete="off" placeholder="名前で探す（例：増田）"><div class="cand" id="rPickList"></div></div>' : '') +
       (it.summary ? '<div class="lbl">要点</div><div class="sum">' + esc(it.summary) + '</div>' : '') +
       (it.points && it.points.length ? '<ul>' + it.points.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('') + '</ul>' : '') +
       '<div class="premise' + (it.premise ? '' : ' hidden') + '" id="rPremise">' + esc(it.premise || '') + '</div>' +
@@ -982,13 +1003,15 @@
       (it.recent && it.recent.length ? '<div class="lbl">最近のやり取り</div><ul>' + it.recent.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('') + '</ul>' : '') +
       (it.decisions && it.decisions.length ? '<div class="lbl">関係する決定・未決</div><ul>' + it.decisions.map(function (p) { return '<li>' + esc(p) + '</li>'; }).join('') + '</ul>' : '') +
       '<div class="acts">' +
-      (it.src === 'chatwork' ? '<button class="btn primary" data-act="chatwork_send" type="button">Chatwork に送る</button>' : '<button class="btn primary" data-act="gmail_draft" type="button">Gmail の下書きへ</button>') +
-      '<button class="btn ghost" data-act="later" type="button">あとで</button>' +
-      '<button class="btn ghost" data-act="no_reply" type="button">返事不要</button>' +
+      (ob ? '<button class="btn primary" data-act="chatwork_send" type="button">Chatwork に送る</button><button class="btn ghost" data-act="cancel" type="button">やめる</button><button class="btn ghost" data-act="later" type="button">あとで</button>'
+          : (it.src === 'chatwork' ? '<button class="btn primary" data-act="chatwork_send" type="button">Chatwork に送る</button>' : '<button class="btn primary" data-act="gmail_draft" type="button">Gmail の下書きへ</button>') +
+            '<button class="btn ghost" data-act="later" type="button">あとで</button>' +
+            '<button class="btn ghost" data-act="no_reply" type="button">返事不要</button>') +
       '<button class="btn ghost" id="rCopy" type="button">本文をコピー</button></div>' +
       '<p class="hint" id="rMsg"></p>';
     box.innerHTML = h;
     $('rDraft').value = it.draft || '';
+    if (ob) setupPicker(it);
     $('rBack').addEventListener('click', function () { rq.cur = null; box.classList.add('hidden'); $('rList').classList.remove('hidden'); renderQueue(); });
     $('rCopy').addEventListener('click', function () { try { navigator.clipboard.writeText($('rDraft').value); $('rMsg').textContent = 'コピーしました'; } catch (e) { $('rMsg').textContent = 'コピーできませんでした'; } });
     $('rRewrite').addEventListener('click', function () { doRewrite(it); });
@@ -996,16 +1019,69 @@
     Array.prototype.forEach.call(box.querySelectorAll('[data-act]'), function (b) {
       b.addEventListener('click', function () { doAct(it, b.getAttribute('data-act'), b); });
     });
-    // 宛先の実物（Gmail は全員返信の To／CC を GAS が元メールから組む）。取れるまでは JSON の to／cc
-    if (it.src === 'gmail' || it.src === 'chatwork') {
+    // 宛先の実物（Gmail は全員返信の To／CC を GAS が元メールから組む）。取れるまでは JSON の to／cc。送信待ちカードは JSON の宛先をそのまま使う
+    if (!ob && (it.src === 'gmail' || it.src === 'chatwork')) {
       postStrict({ action: 'reply_recipients', id: it.id }).then(function (r) {
         if (rq.cur !== it || !$('rRcpt')) return;
         it._rcpt = r; $('rRcpt').textContent = rcptText(it, r);
       }).catch(function () { /* JSON の宛先のまま */ });
     }
   }
+  // 送信待ちカードの相手の候補（GAS の contacts → Drive work-brief/contacts.json。chatwork_contacts.py が置く）。
+  // JSON の candidates（トラが入れた候補）を先に出し、名前で探すと連絡先から引く。選ぶと it._pick に入り、送るときに room_id／to を差し替える
+  function setupPicker(it) {
+    var open = $('rPickOpen'), pick = $('rPick'), q = $('rPickQ'), list = $('rPickList');
+    if (!open || !pick) return;
+    function choose(c) {
+      it._pick = c;
+      $('rRcpt').childNodes[0].textContent = rcptText(it, null);
+      var h2 = $('rDetail').querySelector('h2'); if (h2) h2.textContent = '送信待ち：' + outboundTo(it) + ' 宛て';
+      open.textContent = '別の人にする';
+      Array.prototype.forEach.call(list.children, function (b) { b.classList.toggle('on', b._c === c); });
+      $('rMsg').textContent = '宛先を「' + c.name + '」にしました（送るときに反映）';
+    }
+    function render(cs, gs, note) {
+      list.innerHTML = '';
+      if (!cs.length && !gs.length) { list.innerHTML = '<div class="hint">' + esc(note || '該当なし') + '</div>'; return; }
+      cs.forEach(function (c) {
+        var b = document.createElement('button'); b.type = 'button'; b._c = { kind: 'contact', name: c.name, account_id: c.account_id, room_id: c.room_id, org: c.org || '' };
+        b.innerHTML = '<b>' + esc(c.name) + '</b>' + (c.org ? '　' + esc(c.org) : '') + '<br><span style="color:var(--sub)">DM ' + (c.room_id ? esc(c.room_id) : '（DM なし）') + ' · ID ' + esc(c.account_id) + '</span>';
+        if (!c.room_id) b.disabled = true;
+        b.addEventListener('click', function () { choose(b._c); });
+        list.appendChild(b);
+      });
+      gs.forEach(function (g) {
+        var b = document.createElement('button'); b.type = 'button'; b._c = { kind: 'group', name: g.name, account_id: '', room_id: g.room_id };
+        b.innerHTML = '<b>' + esc(g.name) + '</b>　<span style="color:var(--sub)">グループ ' + esc(g.room_id) + '（[To:] なしで投稿）</span>';
+        b.addEventListener('click', function () { choose(b._c); });
+        list.appendChild(b);
+      });
+    }
+    var cand = (it.candidates || []).map(function (c) { return { name: c.name || '', account_id: String(c.account_id || ''), room_id: String(c.room_id || ''), org: c.org || c.organization || '' }; });
+    open.addEventListener('click', function () {
+      pick.classList.toggle('hidden');
+      if (!pick.classList.contains('hidden')) { if (cand.length && !q.value) render(cand, [], ''); else search(); q.focus(); }
+    });
+    var timer = null;
+    function search() {
+      var s = (q.value || '').trim();
+      if (!s && cand.length) { render(cand, [], ''); return; }
+      list.innerHTML = '<div class="hint">探しています…</div>';
+      postStrict({ action: 'contacts', q: s }).then(function (r) {
+        if (rq.cur !== it) return;
+        render((r && r.contacts) || [], (r && r.groups) || [], (r && r.note) || '該当なし');
+      }).catch(function (e) { list.innerHTML = '<div class="hint">連絡先を取れませんでした（' + esc(e && e.message ? e.message : e) + '）</div>'; });
+    }
+    q.addEventListener('input', function () { clearTimeout(timer); timer = setTimeout(search, 350); });
+    q.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') { ev.preventDefault(); clearTimeout(timer); search(); } });
+  }
   // 宛先の文言。r（GAS の reply_recipients の返事）があればそれを優先
   function rcptText(it, r) {
+    if (it.kind === 'outbound') {
+      if (it._pick) return it._pick.kind === 'group' ? 'ルーム：' + it._pick.name + '（グループ）　宛て：全員' : 'ルーム：' + it._pick.name + ' さんとの DM　宛て：[To:] ' + it._pick.name + ' さん';
+      if (it.to && it.to.length) return 'ルーム：' + (it.room || (it.room_id ? 'DM ' + it.room_id : '（不明）')) + '　宛て：[To:] ' + it.to[0] + ' さん';
+      return '宛て：未定（「相手を選ぶ」で候補から選んでください。選ぶまで送れません）';
+    }
     if (it.src === 'chatwork') {
       var room = (r && r.room) || it.room || ('ルーム ' + (it.room_id || '（不明）'));
       return 'ルーム：' + room + '　宛て：[To:] ' + (it.from || '（不明）') + ' さん';
@@ -1035,10 +1111,17 @@
   }
   function doAct(it, act, btn) {
     var draft = $('rDraft') ? $('rDraft').value : '';
-    if (act === 'chatwork_send' && !confirm('Chatwork に送ります。よいですか？')) return;
+    var payload = { action: 'reply_action', id: it.id, act: act, draft: draft };
+    if (it.kind === 'outbound' && act === 'chatwork_send') {
+      var who = it._pick ? it._pick.name : (it.to && it.to.length ? it.to[0] : '');
+      if (!who && !it.room_id) { $('rMsg').textContent = '相手が未定です。「相手を選ぶ」で候補から選んでください'; return; }
+      if (it._pick) { payload.room_id = it._pick.room_id; payload.to_account_id = it._pick.account_id || ''; payload.to_name = it._pick.name; }
+      if (!confirm('Chatwork で ' + (who || 'ルーム ' + it.room_id) + ' に送ります。よいですか？')) return;
+    } else if (act === 'chatwork_send' && !confirm('Chatwork に送ります。よいですか？')) return;
+    if (act === 'cancel' && !confirm('送らずにやめます。よいですか？')) return;
     Array.prototype.forEach.call($('rDetail').querySelectorAll('button'), function (b) { b.disabled = true; });
     $('rMsg').textContent = '処理中…';
-    postStrict({ action: 'reply_action', id: it.id, act: act, draft: draft }).then(function (r) {
+    postStrict(payload).then(function (r) {
       $('rMsg').textContent = (r && r.say) || '完了';
       rq.items = rq.items.filter(function (x) { return x.id !== it.id; });
       if (act === 'later') { it.state = 'later'; it.order = 4; rq.items.push(it); }
